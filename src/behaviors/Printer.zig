@@ -13,8 +13,7 @@ pub fn trans(
     builder: *actor.EffectBuilder,
     msg: actor.TypedMessage(i64),
 ) Allocator.Error!actor.Effect {
-    _ = msg;
-    //state.out.writer().print("{d}\n", .{msg.data}) catch {};
+    state.out.writer().print("{}\n", .{msg.data.*}) catch {};
 
     return builder.finish(.{
         .state = state,
