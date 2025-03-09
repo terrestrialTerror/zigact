@@ -1,19 +1,36 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
+const actors = @import("actor.zig");
+
+const Adder = @import("behaviors/Adder.zig");
+const Printer = @import("behaviors/Printer.zig");
 
 pub fn main() !void {
-    // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const alloc = gpa.allocator();
+    var rand = std.Random.DefaultPrng.init(0);
+    var config = actors.Configuration{
+        .rng = rand.random(),
+        .alloc = alloc,
+        .actors = .init(alloc),
+        .events = .init(alloc),
+    };
+    defer config.deinit();
 
-    // stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
-    const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
+    const adder = try Adder.behavior(alloc);
+    const addr_address = try adder.spawnTypedAddress(&config);
 
-    try stdout.print("Run `zig build test` to run the tests.\n", .{});
+    const printer = try Printer.behavior(alloc, std.io.getStdOut());
+    const addr_printer = try printer.spawnTypedAddress(&config);
 
-    try bw.flush(); // don't forget to flush!
+    try addr_address.sendCopyConfig(&config, .{
+        .left = 3,
+        .right = 4,
+        .send_to = addr_printer,
+    });
+
+    while (try config.step()) {}
 }
 
 test "simple test" {
