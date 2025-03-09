@@ -192,7 +192,7 @@ pub fn TypedBehavior(S: type) type {
 pub const Behavior = struct {
     state: *anyopaque,
     trans: *const fn (*anyopaque, *EffectBuilder, Message) Allocator.Error!Effect,
-    deinit_fn: *const fn (*anyopaque) void,
+    deinit_fn: *const fn (*anyopaque, Allocator) void,
 
     pub fn reify(this: @This(), S: type) TypedBehavior(S) {
         return .{
@@ -206,9 +206,8 @@ pub const Behavior = struct {
         return this.trans(this.state, builder, message);
     }
 
-    pub fn deinit(this: @This()) void {
-        std.log.debug("{}", .{this});
-        this.deinit_fn(this.state);
+    pub fn deinit(this: @This(), allocator: Allocator) void {
+        this.deinit_fn(this.state, allocator);
     }
 };
 
@@ -223,7 +222,7 @@ pub const Configuration = struct {
     pub fn deinit(this: @This()) void {
         var actor_iter = this.actors.iterator();
         while (actor_iter.next()) |entry| {
-            entry.value_ptr.deinit();
+            entry.value_ptr.deinit(this.alloc);
         }
         for (this.events.items) |event| {
             event.message.deinit(event.message.data, this.alloc);
@@ -263,7 +262,7 @@ pub const Configuration = struct {
                     // it can still fail after this, so we have to clean up
                     // just in case memory fails to allocate
                     for (effect.actors) |actor| {
-                        actor.behavior.deinit();
+                        actor.behavior.deinit(this.alloc);
                     }
                     for (effect.events) |new_event| {
                         const msg = new_event.message;
