@@ -9,7 +9,8 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
-    var rand = std.Random.DefaultPrng.init(0);
+    var rand = std.Random.DefaultPrng.init(@bitCast(std.time.milliTimestamp()));
+
     var config = actors.Configuration{
         .rng = rand.random(),
         .alloc = alloc,
@@ -30,6 +31,17 @@ pub fn main() !void {
         .send_to = addr_printer,
     });
 
+    try addr_address.sendCopyConfig(&config, .{
+        .left = 17,
+        .right = 12,
+        .send_to = addr_printer,
+    });
+
+    try addr_address.sendCopyConfig(&config, .{
+        .left = -2_000_000_000,
+        .right = -2_000_0000_000_0000,
+        .send_to = addr_printer,
+    });
     while (try config.step()) {}
 }
 
