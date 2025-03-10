@@ -121,11 +121,11 @@ pub const EffectBuilder = struct {
     pub fn spawnActor(this: *@This(), behavior: Behavior) Allocator.Error!Address {
         const addr = this.rng.random().int(Address);
         const actor = Actor{
-            .addr = addr,
+            .address = addr,
             .behavior = behavior,
         };
         try this.actors.append(actor);
-        return actor;
+        return addr;
     }
 
     pub fn send(this: *@This(), address: Address, message: Message) Allocator.Error!void {
@@ -245,23 +245,23 @@ pub const Configuration = struct {
                 errdefer {
                     // it can still fail after this, so we have to clean up
                     // just in case memory fails to allocate
-                    for (effect_builder.actors) |actor| {
+                    for (effect_builder.actors.items) |actor| {
                         actor.behavior.deinit(this.alloc);
                     }
-                    for (effect_builder.events) |new_event| {
+                    for (effect_builder.events.items) |new_event| {
                         const msg = new_event.message;
                         msg.deinit(msg.data, this.alloc);
                     }
                 }
-                if (effect_builder.actors.len < std.math.maxInt(ActorHashMap.Size)) {
-                    try this.actors.ensureTotalCapacity(@intCast(effect_builder.actors.len));
+                if (effect_builder.actors.items.len < std.math.maxInt(ActorHashMap.Size)) {
+                    try this.actors.ensureTotalCapacity(@intCast(effect_builder.actors.items.len));
                 } else {
                     return error.TooManyActors;
                 }
                 // note, indecies into the array are not invalidated if
                 // the array needs to grow as the elements are memcopy'd
                 // thus preserving order.
-                try this.events.ensureTotalCapacity(effect_builder.events.len);
+                try this.events.ensureTotalCapacity(effect_builder.events.items.len);
 
                 // everything after this will succeed
                 // lets complete this atomic operation.
@@ -275,8 +275,8 @@ pub const Configuration = struct {
                     _ = this.actors.remove(behavior.key_ptr.*);
                 }
 
-                this.events.appendSlice(effect_builder.events) catch unreachable;
-                for (effect_builder.actors) |actor| {
+                this.events.appendSlice(effect_builder.events.items) catch unreachable;
+                for (effect_builder.actors.items) |actor| {
                     this.actors.put(actor.address, actor.behavior) catch unreachable;
                 }
             }
@@ -290,3 +290,7 @@ pub const Configuration = struct {
         }
     }
 };
+
+test {
+    std.testing.refAllDeclsRecursive(@This());
+}
