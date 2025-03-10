@@ -134,20 +134,12 @@ pub const EffectBuilder = struct {
             .message = message,
         });
     }
-
-    pub fn finish(this: *@This(), next_behavior: Behavior) Effect {
-        return .{
-            .actors = this.actors.items,
-            .events = this.events.items,
-            .next_behavior = next_behavior,
-        };
-    }
 };
 
 pub fn TypedBehavior(S: type) type {
-    return struct {
+    return packed struct {
         state: *S,
-        trans: *const fn (*S, *EffectBuilder, Message) Allocator.Error!Effect,
+        trans: *const fn (*S, *EffectBuilder, Message) Allocator.Error!?TypedBehavior(S),
         deinit_fn: *const fn (*S, Allocator) void,
 
         pub fn spawnTypedAddress(this: @This(), config: *Configuration) !TypedAddress(S.Message) {
@@ -163,7 +155,7 @@ pub fn TypedBehavior(S: type) type {
             };
         }
 
-        pub fn deriveDeinit(state: *S, trans: *const fn (*S, *EffectBuilder, Message) Allocator.Error!Effect) @This() {
+        pub fn deriveDeinit(state: *S, trans: *const fn (*S, *EffectBuilder, Message) Allocator.Error!?TypedBehavior(S)) @This() {
             return .{
                 .state = state,
                 .trans = &trans,
@@ -180,29 +172,21 @@ pub fn TypedBehavior(S: type) type {
         }
 
         pub fn erase(this: @This()) Behavior {
-            return .{
-                .state = @ptrCast(this.state),
-                .trans = @ptrCast(this.trans),
-                .deinit_fn = @ptrCast(this.deinit_fn),
-            };
+            return @bitCast(this);
         }
     };
 }
 
-pub const Behavior = struct {
+pub const Behavior = packed struct {
     state: *anyopaque,
-    trans: *const fn (*anyopaque, *EffectBuilder, Message) Allocator.Error!Effect,
+    trans: *const fn (*anyopaque, *EffectBuilder, Message) Allocator.Error!?Behavior,
     deinit_fn: *const fn (*anyopaque, Allocator) void,
 
     pub fn reify(this: @This(), S: type) TypedBehavior(S) {
-        return .{
-            .state = @ptrCast(this.state),
-            .trans = @ptrCast(this.trans),
-            .deinit_fn = @ptrCast(this.deinit_fn),
-        };
+        return @bitCast(this);
     }
 
-    pub fn call(this: @This(), builder: *EffectBuilder, message: Message) Allocator.Error!Effect {
+    pub fn call(this: @This(), builder: *EffectBuilder, message: Message) Allocator.Error!?Behavior {
         return this.trans(this.state, builder, message);
     }
 
@@ -257,27 +241,27 @@ pub const Configuration = struct {
             // or the actor cleaned itself up. in either case the
             // correct action is to disregard the current event.
             if (this.actors.getEntry(event.target)) |behavior| {
-                const effect = try behavior.value_ptr.call(&effect_builder, event.message);
+                const new_behavior = try behavior.value_ptr.call(&effect_builder, event.message);
                 errdefer {
                     // it can still fail after this, so we have to clean up
                     // just in case memory fails to allocate
-                    for (effect.actors) |actor| {
+                    for (effect_builder.actors) |actor| {
                         actor.behavior.deinit(this.alloc);
                     }
-                    for (effect.events) |new_event| {
+                    for (effect_builder.events) |new_event| {
                         const msg = new_event.message;
                         msg.deinit(msg.data, this.alloc);
                     }
                 }
-                if (effect.actors.len < std.math.maxInt(ActorHashMap.Size)) {
-                    try this.actors.ensureTotalCapacity(@intCast(effect.actors.len));
+                if (effect_builder.actors.len < std.math.maxInt(ActorHashMap.Size)) {
+                    try this.actors.ensureTotalCapacity(@intCast(effect_builder.actors.len));
                 } else {
                     return error.TooManyActors;
                 }
                 // note, indecies into the array are not invalidated if
                 // the array needs to grow as the elements are memcopy'd
                 // thus preserving order.
-                try this.events.ensureTotalCapacity(effect.events.len);
+                try this.events.ensureTotalCapacity(effect_builder.events.len);
 
                 // everything after this will succeed
                 // lets complete this atomic operation.
@@ -285,14 +269,14 @@ pub const Configuration = struct {
                 // when cleaning up or transitioning, the
                 // actor manages it's own memory, so all that's
                 // left at this point is to assign the new behavior
-                if (effect.next_behavior) |next_behavior| {
-                    behavior.value_ptr.* = next_behavior;
+                if (new_behavior) |nb| {
+                    behavior.value_ptr.* = nb;
                 } else {
                     _ = this.actors.remove(behavior.key_ptr.*);
                 }
 
-                this.events.appendSlice(effect.events) catch unreachable;
-                for (effect.actors) |actor| {
+                this.events.appendSlice(effect_builder.events) catch unreachable;
+                for (effect_builder.actors) |actor| {
                     this.actors.put(actor.address, actor.behavior) catch unreachable;
                 }
             }
@@ -305,10 +289,4 @@ pub const Configuration = struct {
             return false;
         }
     }
-};
-
-pub const Effect = struct {
-    actors: []const Actor,
-    events: []const Event,
-    next_behavior: ?Behavior,
 };
